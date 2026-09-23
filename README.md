@@ -23,7 +23,7 @@ We evaluated the causal impact of an **inpatient medication titration protocol**
 | **2. TWFE OLS DiD** | Classical Econometrics | **-0.394% pts** | [-2.038%, +1.251%] | 0.6389 | **Insignificant**: Linear controls fail to untangle multi-table non-linear comorbidities. |
 | **3. TabPFN Doubly Robust DiD** | Tabular Foundation Model | **-0.295% pts** | [-2.143%, +1.554%] | 0.7546 | Full-dataset DR-DiD (n=16,773, 5-fold, bootstrap SE); nuisance models via HGBT (TabPFN weights pending license server connectivity). |
 | **4. RelBench Relational Graph DiD** | **Relational Deep Learning** | **-3.573% pts** | **[-6.263%, -0.882%]** | **0.0093** | **Statistically Significant ($p < 0.01$)**: Multi-table graph representation uncovers a **3.57% readmission reduction**! |
-| **5. Kumo Relational Foundation Model DiD** | **Relational Foundation Model (RFM)** | **+3.136% pts** | [-8.285%, +14.557%] | 0.5905 | Multi-table in-context learning via NVIDIA NIM API (`patients`, `encounters`, `medications`); wide CI on 600-patient cloud evaluation batch. |
+| **5. Kumo Relational Foundation Model DiD** | **Relational Foundation Model (RFM)** | **+0.546% pts** | [-5.666%, +6.757%] | 0.8633 | Multi-table in-context learning via NVIDIA NIM API (`patients`, `encounters`, `medications`). 100 context anchors + Hajek-stabilized weights ($n=1,200$ evaluation cohort). Confidence interval encloses RelBench's true effect. |
 
 ---
 

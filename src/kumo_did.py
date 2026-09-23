@@ -267,8 +267,8 @@ def _query_kumo_nim(payload: dict, api_key: str, max_retries: int = 3) -> dict:
 def run_kumo_dr_did(
     df_wide: pd.DataFrame,
     db_path: str = "data/clinical_trial.db",
-    sample_size: int = 500,
-    batch_size: int = 25,
+    sample_size: int = 1200,
+    batch_size: int = 50,
     bootstrap_B: int = 500,
     random_state: int = 42,
 ) -> dict:
@@ -276,10 +276,10 @@ def run_kumo_dr_did(
     Fits Doubly Robust DiD using NVIDIA Kumo Relational Foundation Model (RFM).
 
     Queries Kumo NIM for:
-      - e_hat: Propensity scores via multi-table graph classification
-      - m0_hat: Baseline counterfactual readmission trend via multi-table regression
+      - e_hat: Propensity scores via multi-table graph classification (100-patient in-context anchors)
+      - m0_hat: Baseline counterfactual readmission trend via multi-table regression (80-patient in-context anchors)
 
-    Computes Sant'Anna & Zhao (2020) ATT and bootstrap standard errors.
+    Computes Sant'Anna & Zhao (2020) ATT with self-normalized (Hajek) weights and bootstrap SE.
     """
     api_key = os.environ.get("NVIDIA_API_KEY", "")
     if not api_key:
@@ -298,14 +298,14 @@ def run_kumo_dr_did(
     eval_pids = np.concatenate([eval_ctrl, eval_trt])
     rng.shuffle(eval_pids)
 
-    # 2. Context pool (separate from evaluation cohort to ensure out-of-context prediction)
+    # 2. Context pool (100 patients: 50 ctrl, 50 trt for clf; 80 ctrl for reg)
     rem_ctrl = np.setdiff1d(ctrl_pool, eval_pids)
     rem_trt = np.setdiff1d(trt_pool, eval_pids)
-    ctx_ctrl = rng.choice(rem_ctrl, 20, replace=False)
-    ctx_trt = rng.choice(rem_trt, 20, replace=False)
+    ctx_ctrl = rng.choice(rem_ctrl, 50, replace=False)
+    ctx_trt = rng.choice(rem_trt, 50, replace=False)
     ctx_pids_clf = np.concatenate([ctx_ctrl, ctx_trt]).tolist()
     # For outcome regression, context is purely control units
-    ctx_pids_reg = rng.choice(rem_ctrl, 30, replace=False).tolist()
+    ctx_pids_reg = rng.choice(rem_ctrl, 80, replace=False).tolist()
 
     all_query_pids = list(set(eval_pids.tolist() + ctx_pids_clf + ctx_pids_reg))
     pids_str = ",".join(str(p) for p in all_query_pids)
@@ -350,12 +350,10 @@ def run_kumo_dr_did(
         )
         res_clf = _query_kumo_nim(payload_clf, api_key)
         for pred in res_clf["predictions"]:
-            pid = int(pred["id"])
-            # Map index back to patient_nbr
             orig_idx = int(pred["id"]) - len(ctx_pids_clf)
             target_pid = batch_targets[orig_idx]
             p_true = pred["probabilities"]["true"]
-            e_hat_dict[target_pid] = np.clip(p_true, 0.02, 0.98)
+            e_hat_dict[target_pid] = np.clip(p_true, 0.05, 0.95)
 
         # B. Baseline Outcome Regression Query
         payload_reg = _build_kumo_payload(
@@ -373,19 +371,22 @@ def run_kumo_dr_did(
             target_pid = batch_targets[orig_idx]
             m0_hat_dict[target_pid] = float(pred["prediction"])
 
-        if (b + 1) % 5 == 0 or (b + 1) == n_batches:
+        if (b + 1) % 6 == 0 or (b + 1) == n_batches:
             print(f"    [batch {b+1}/{n_batches}] Completed {len(e_hat_dict)} patients in {time.time() - t0:.1f}s")
 
-    # 5. Compute Sant'Anna & Zhao Doubly Robust ATT
+    # 5. Compute Sant'Anna & Zhao Doubly Robust ATT with Hajek Normalization
     N = len(eval_pids)
     D = np.array([panel_map[pid]["treatment"] for pid in eval_pids], dtype=float)
     dY = np.array([panel_map[pid]["delta_readmitted_30d"] for pid in eval_pids], dtype=float)
     e_hat = np.array([e_hat_dict[pid] for pid in eval_pids], dtype=float)
     m0_hat = np.array([m0_hat_dict[pid] for pid in eval_pids], dtype=float)
 
-    mean_D = np.mean(D)
     weight_ctrl = e_hat / (1.0 - e_hat)
-    psi = (D * (dY - m0_hat) - (1.0 - D) * weight_ctrl * (dY - m0_hat)) / mean_D
+    mean_w_ctrl = np.mean(weight_ctrl * (1.0 - D))
+    mean_D = np.mean(D)
+
+    # Hajek-stabilized influence function
+    psi = (D * (dY - m0_hat)) / mean_D - ((1.0 - D) * weight_ctrl * (dY - m0_hat)) / mean_w_ctrl
     tau = float(np.mean(psi))
 
     # Asymptotic SE
@@ -398,7 +399,10 @@ def run_kumo_dr_did(
     boot_rng = np.random.RandomState(random_state)
     for _ in range(bootstrap_B):
         idx = boot_rng.choice(N, N, replace=True)
-        psi_b = (D[idx] * (dY[idx] - m0_hat[idx]) - (1.0 - D[idx]) * (e_hat[idx] / (1.0 - e_hat[idx])) * (dY[idx] - m0_hat[idx])) / np.mean(D[idx])
+        w_b = e_hat[idx] / (1.0 - e_hat[idx])
+        mw_b = np.mean(w_b * (1.0 - D[idx]))
+        mD_b = np.mean(D[idx])
+        psi_b = (D[idx] * (dY[idx] - m0_hat[idx])) / mD_b - ((1.0 - D[idx]) * w_b * (dY[idx] - m0_hat[idx])) / mw_b
         boot_taus.append(np.mean(psi_b))
 
     se_boot = float(np.std(boot_taus, ddof=1))

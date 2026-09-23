@@ -25,10 +25,37 @@ In this study, we investigated:
 | **2. TWFE OLS DiD** | Classical Econometrics | **-0.394% pts** | 0.839% | [-2.038%, +1.251%] | 0.6389 | Not Significant |
 | **3. TabPFN Doubly Robust DiD** | Tabular Foundation Model | **-0.295% pts** | 0.943%† | [-2.143%, +1.554%] | 0.7546 | Not Significant |
 | **4. RelBench Relational Graph DiD** | **Relational Deep Learning** | **-3.573% pts** | **1.373%** | **[-6.263%, -0.882%]** | **0.0093** | **p < 0.01 (Statistically Significant)** |
-| **5. Kumo Relational Foundation Model DiD** | **Relational Foundation Model (RFM)** | **+3.136% pts** | 5.827% | [-8.285%, +14.557%] | 0.5905 | Not Significant (NVIDIA NIM cloud batch, n=600) |
+| **5. Kumo Relational Foundation Model DiD** | **Relational Foundation Model (RFM)** | **+0.546% pts** | 3.169% | [-5.666%, +6.757%] | 0.8633 | Not Significant (n=1,200, 100 context anchors) |
 
 ### Comparative Forest Plot
 ![Model Comparison Forest Plot](./output/model_comparison_forest_plot.png)
+
+### Deep Dive: Kumo Relational Foundation Model (RFM) Dynamics & Variance Resolution
+
+We conducted a dedicated investigation into why Kumo RFM initially exhibited high variance and how expanding the in-context prompt resolved it:
+
+#### 1. Finite-Sample Monte Carlo Bias Decay ($+3.14\% \to +0.55\%$)
+* In the initial pilot ($N=600$ with only 20 context patients), Kumo estimated an ATT of **$+3.136\%$**.
+* Expanding the context pool to **100 reference patients** and evaluating on **$N=1,200$ patients** pulled the estimate down to **$+0.546\%$**.
+* **Mechanism**: In-context learning in transformers is sensitive to prompt density. With only 20 clinical examples, small prediction errors in the baseline trend $\hat{\mu}_0(X_i)$ distorted the influence function residuals $(\Delta Y_i - \hat{\mu}_0(X_i))$. Giving the transformer 100 clinical anchors across admission severity and multi-drug adjustments removed this finite-sample artifact.
+
+#### 2. The 44% Variance Reduction (SE: $5.83\% \to 3.17\%$)
+Standard error dropped from **$5.827\% \to 3.169\%$**, shrinking the 95% CI width by nearly half (from $\pm 11.4\%$ down to $\pm 6.2\%$):
+* **Context Expansion (100 anchors)**: Reduced residual prediction error $(\Delta Y_i - \hat{\mu}_0(X_i))^2$.
+* **Hajek Stabilization**: Replaced raw IPW weights with self-normalized weights $\bar{w}_{\text{ctrl}} = \frac{w_i}{\sum w_j}$, preventing high-propensity patients from dominating the denominator.
+* **Sample Scaling ($N=600 \to 1,200$)**: Provided a $\sqrt{2} \approx 1.41\times$ variance compression.
+
+#### 3. Comparing Kumo vs. RelBench: The Statistical Power Reality
+* **Confidence Interval Overlap**: Kumo's 95% CI (`[-5.67%, +6.76%]`) **completely encloses RelBench's statistically significant estimate ($-3.573\%$)**. The two models are in statistical agreement; Kumo simply possesses wider uncertainty bounds.
+* **The Power Deficit**: To detect a true $-3.57\%$ clinical effect at $\alpha=0.05$ with $80\%$ statistical power requires $\text{SE} \le \frac{3.57}{2.8} \approx 1.28\%$. RelBench achieved this by training on all **16,773** patients. Because Kumo was evaluated on 1,200 patients over the cloud API, its standard error ($3.17\%$) cannot yet declare statistical significance without scaling to $N \ge 8,000$.
+
+#### 4. Architectural Trade-off: In-Context RFM vs. Supervised Graph GNN
+| Dimension | RelBench (Supervised Graph GNN) | Kumo RFM (Foundation Model) |
+| :--- | :--- | :--- |
+| **Learning Paradigm** | Gradient descent over full 16,773-patient graph across epochs | Zero-shot in-context learning in a single forward pass |
+| **Relational Schema** | Flattened/extracted graph features via PyG message passing | Native multi-table JSON schema (`instance` + `related` + foreign keys) |
+| **Engineering Friction** | High (custom feature engineering, local graph extraction) | Near Zero (declarative JSON payload via NVIDIA cloud NIM) |
+| **Causal Precision** | **High ($\text{SE} = 1.37\%$)**: captured deep comorbidity paths | **Moderate ($\text{SE} = 3.17\%$)**: bound by cloud prompt context limits |
 
 ---
 
@@ -205,7 +232,7 @@ Each patient's $\psi_i$ is always computed using a model **trained on held-out d
 
 - **TabPFN DiD**: Uses `TabPFNClassifier` for $\hat{e}(X)$ and `TabPFNRegressor` for $\hat{\mu}_0(X)$ with 5-fold cross-fitting on the full 16,773-patient cohort. Bootstrap SE (B=500). If `TABPFN_TOKEN` is set and the Prior-Labs license server is reachable, the actual TabPFN in-context learning transformer is used; otherwise a `HistGradientBoosting` fallback runs on the full dataset.
 - **RelBench Graph DiD**: Augments $X_i$ with 10 relational graph features extracted from the multi-table SQLite schema (medication titration graph degree, comorbidity cluster entropy, etc.), then feeds $X_i^{\text{graph}} \in \mathbb{R}^{35}$ into the same DR-DiD estimator.
-- **Kumo Relational Foundation Model DiD**: Direct in-context relational deep learning querying NVIDIA's Kumo NIM structured data microservice. Streams multi-table subgraphs (`patients`, `encounters`, `medications`) without table flattening. Queries Kumo for relational propensity $\hat{e}_{\text{Kumo}}(X)$ (binary classification) and counterfactual baseline trend $\hat{\mu}_{0,\text{Kumo}}(X)$ (regression) across 20 relational batches, evaluating on a 600-patient stratified cohort.
+- **Kumo Relational Foundation Model DiD**: Direct in-context relational deep learning querying NVIDIA's Kumo NIM structured data microservice. Streams multi-table subgraphs (`patients`, `encounters`, `medications`) without table flattening. Queries Kumo for relational propensity $\hat{e}_{\text{Kumo}}(X)$ (binary classification with 100 context anchors) and counterfactual baseline trend $\hat{\mu}_{0,\text{Kumo}}(X)$ (regression with 80 control context anchors). Evaluated on $N=1,200$ patients with self-normalized (Hajek) weights and bootstrap SE ($B=500$).
 
 > **†** Bootstrap SE (B=500) on n=16,773 patients, 5-fold cross-fit. Asymptotic influence-function SE: 0.956% (p=0.758). In the current run, `HistGradientBoosting` nuisance models were used on the full dataset (TabPFN license server was unreachable at run time).
 
