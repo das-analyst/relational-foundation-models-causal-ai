@@ -4,13 +4,14 @@ Kumo Relational Foundation Model (RFM) Doubly Robust Difference-in-Differences.
 Connects directly to the live NVIDIA Inference Microservice (NIM) cloud endpoint:
 https://ai.api.nvidia.com/v1/structured-data/nvidia/kumo-relational/predictions
 
-Takes the multi-table relational database (patients, encounters, medications)
-and uses Kumo RFM in-context learning to estimate:
-  1. Propensity Score: e_hat(X) = P(Treatment = 1 | Relational History)
-  2. Baseline Outcome Trend: m0_hat(X) = E[delta_Y | Treatment = 0, Relational History]
-
-Then computes the Sant'Anna & Zhao (2020) Doubly Robust ATT estimator
-with asymptotic influence function SE and bootstrap SE.
+Features:
+  - Complete 4-table relational schema: patients, encounters, medications, diagnoses
+  - High-throughput parallel inference across concurrent worker threads
+  - Dual-Classification Architecture:
+      1. Relational Propensity: e_hat(X) = P(Treatment = 1 | Relational History)
+      2. Counterfactual Baseline: m0_hat(X) = P(Readmitted_post = 1 | Control, X) - Y_pre
+  - Sant'Anna & Zhao (2020) Doubly Robust DiD with Hajek weight normalization
+  - Asymptotic influence function standard error & non-parametric bootstrap SE (B=500)
 """
 
 import os
@@ -20,6 +21,7 @@ import requests
 import numpy as np
 import pandas as pd
 from scipy import stats
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 KUMO_ENDPOINT = "https://ai.api.nvidia.com/v1/structured-data/nvidia/kumo-relational/predictions"
@@ -32,62 +34,64 @@ def _build_kumo_payload(
     pat_map: dict,
     enc_map: dict,
     med_map: dict,
-    task_kind: str = "binary_classification",
-):
+    diag_map: dict,
+    target_field: str = "treatment",
+) -> dict:
     """
-    Constructs the exact multi-table relational JSON payload required by Kumo RFM NIM.
+    Constructs the 4-table relational JSON payload required by Kumo RFM NIM.
     Schema includes:
       - instance_table (patients with anchor_time and target)
-      - related_tables (patients, encounters, medications)
-      - relationships (instance -> patients, encounters, medications)
+      - related_tables (patients, encounters, medications, diagnoses)
+      - relationships (foreign key links from instance -> related tables)
     """
-    is_clf = (task_kind == "binary_classification")
-    target_col = "treatment" if is_clf else "outcome"
-    target_dtype = "bool" if is_clf else "float64"
-    target_stype = "categorical" if is_clf else "numerical"
-
     task_def = {
-        "kind": task_kind,
+        "kind": "binary_classification",
         "target": {
-            "column_name": target_col,
-            "dtype": target_dtype,
+            "column_name": target_field,
+            "dtype": "bool",
+            "classes": ["false", "true"],
+            "positive_class": "true",
         },
         "entity_table_names": ["patients"],
         "anchor_time_column": "anchor_time",
     }
-    if is_clf:
-        task_def["target"]["classes"] = ["false", "true"]
-        task_def["target"]["positive_class"] = "true"
 
     # Context rows
-    ctx_inst, ctx_pat, ctx_enc, ctx_med = [], [], [], []
+    ctx_inst, ctx_pat, ctx_enc, ctx_med, ctx_diag = [], [], [], [], []
     for i, pid in enumerate(ctx_ids):
         p_row = panel_map[pid]
-        target_val = bool(p_row["treatment"]) if is_clf else float(p_row["delta_readmitted_30d"])
+        target_val = bool(p_row[target_field])
         ctx_inst.append([i, "2025-01-01T00:00:00Z", int(pid), target_val])
 
         # Related: patients
         p = pat_map.get(pid, {})
         ctx_pat.append([i, int(pid), str(p.get("race", "?")), str(p.get("gender", "?")), str(p.get("age", "?"))])
 
-        # Related: encounters (up to 3 pre-intervention stays)
+        # Related: encounters (up to 3 stays)
         for e in enc_map.get(pid, [])[:3]:
             ctx_enc.append([
                 i, int(e["encounter_id"]), int(pid),
                 float(e["time_in_hospital"]), float(e["num_lab_procedures"]),
                 float(e["num_medications"]), float(e["number_emergency"]),
-                float(e["number_inpatient"]), float(e["number_diagnoses"])
+                float(e["number_inpatient"]), float(e["number_diagnoses"]),
             ])
 
-        # Related: medications (up to 4 prescribed drugs/dosages)
+        # Related: medications (up to 4 active drugs/dosages)
         for m in med_map.get(pid, [])[:4]:
             ctx_med.append([
                 i, int(m["id"]), int(pid),
-                str(m["drug_name"]), str(m["status"]), float(m["is_dosage_change"])
+                str(m["drug_name"]), str(m["status"]), float(m["is_dosage_change"]),
+            ])
+
+        # Related: diagnoses (up to 3 ICD-9 comorbidity categories)
+        for d in diag_map.get(pid, [])[:3]:
+            ctx_diag.append([
+                i, int(d["id"]), int(pid),
+                str(d["category"]), str(d["icd9_code"]),
             ])
 
     # Predict rows
-    pred_inst, pred_pat, pred_enc, pred_med = [], [], [], []
+    pred_inst, pred_pat, pred_enc, pred_med, pred_diag = [], [], [], [], []
     for j, pid in enumerate(pred_ids):
         idx = len(ctx_ids) + j
         pred_inst.append([idx, "2025-02-01T00:00:00Z", int(pid)])
@@ -100,16 +104,20 @@ def _build_kumo_payload(
                 idx, int(e["encounter_id"]), int(pid),
                 float(e["time_in_hospital"]), float(e["num_lab_procedures"]),
                 float(e["num_medications"]), float(e["number_emergency"]),
-                float(e["number_inpatient"]), float(e["number_diagnoses"])
+                float(e["number_inpatient"]), float(e["number_diagnoses"]),
             ])
 
         for m in med_map.get(pid, [])[:4]:
             pred_med.append([
                 idx, int(m["id"]), int(pid),
-                str(m["drug_name"]), str(m["status"]), float(m["is_dosage_change"])
+                str(m["drug_name"]), str(m["status"]), float(m["is_dosage_change"]),
             ])
 
-    output_fields = ["prediction", "probabilities"] if is_clf else ["prediction"]
+        for d in diag_map.get(pid, [])[:3]:
+            pred_diag.append([
+                idx, int(d["id"]), int(pid),
+                str(d["category"]), str(d["icd9_code"]),
+            ])
 
     payload = {
         "model": "kumo-relational",
@@ -120,7 +128,7 @@ def _build_kumo_payload(
                     "instance_id": {"dtype": "int64", "stype": "ID", "nullable": False},
                     "anchor_time": {"dtype": "timestamp[us]", "stype": "timestamp", "nullable": False},
                     "patient_id": {"dtype": "int64", "stype": "ID", "nullable": False},
-                    target_col: {"dtype": target_dtype, "stype": target_stype},
+                    target_field: {"dtype": "bool", "stype": "categorical"},
                 },
                 "primary_key": "instance_id",
             },
@@ -160,6 +168,16 @@ def _build_kumo_payload(
                     },
                     "primary_key": ["instance_id", "med_id"],
                 },
+                "diagnoses": {
+                    "columns": {
+                        "instance_id": {"dtype": "int64", "stype": "ID", "nullable": False},
+                        "diag_id": {"dtype": "int64", "stype": "ID", "nullable": False},
+                        "patient_id": {"dtype": "int64", "stype": "ID", "nullable": False},
+                        "category": {"dtype": "string", "stype": "categorical"},
+                        "icd9_code": {"dtype": "string", "stype": "categorical"},
+                    },
+                    "primary_key": ["instance_id", "diag_id"],
+                },
             },
             "relationships": [
                 {
@@ -177,12 +195,17 @@ def _build_kumo_payload(
                     "target_table": "medications",
                     "target_columns": ["instance_id", "patient_id"],
                 },
+                {
+                    "source_columns": ["instance_id", "patient_id"],
+                    "target_table": "diagnoses",
+                    "target_columns": ["instance_id", "patient_id"],
+                },
             ],
         },
         "context": {
             "instance_table": {
                 "format": "arrays",
-                "columns": ["instance_id", "anchor_time", "patient_id", target_col],
+                "columns": ["instance_id", "anchor_time", "patient_id", target_field],
                 "rows": ctx_inst,
             },
             "related_tables": {
@@ -204,6 +227,11 @@ def _build_kumo_payload(
                     "format": "arrays",
                     "columns": ["instance_id", "med_id", "patient_id", "drug_name", "status", "is_dosage_change"],
                     "rows": ctx_med,
+                },
+                "diagnoses": {
+                    "format": "arrays",
+                    "columns": ["instance_id", "diag_id", "patient_id", "category", "icd9_code"],
+                    "rows": ctx_diag,
                 },
             },
         },
@@ -233,9 +261,14 @@ def _build_kumo_payload(
                     "columns": ["instance_id", "med_id", "patient_id", "drug_name", "status", "is_dosage_change"],
                     "rows": pred_med,
                 },
+                "diagnoses": {
+                    "format": "arrays",
+                    "columns": ["instance_id", "diag_id", "patient_id", "category", "icd9_code"],
+                    "rows": pred_diag,
+                },
             },
         },
-        "output": {"fields": output_fields},
+        "output": {"fields": ["prediction", "probabilities"]},
     }
     return payload
 
@@ -267,8 +300,9 @@ def _query_kumo_nim(payload: dict, api_key: str, max_retries: int = 3) -> dict:
 def run_kumo_dr_did(
     df_wide: pd.DataFrame,
     db_path: str = "data/clinical_trial.db",
-    sample_size: int = 3000,
+    sample_size: int = 12000,
     batch_size: int = 100,
+    max_workers: int = 6,
     bootstrap_B: int = 500,
     random_state: int = 42,
 ) -> dict:
@@ -276,8 +310,9 @@ def run_kumo_dr_did(
     Fits Doubly Robust DiD using NVIDIA Kumo Relational Foundation Model (RFM).
 
     Queries Kumo NIM for:
-      - e_hat: Propensity scores via multi-table graph classification (100-patient in-context anchors)
-      - m0_hat: Baseline counterfactual readmission trend via multi-table regression (80-patient in-context anchors)
+      - e_hat: Propensity scores via 4-table relational classification (100 in-context anchors)
+      - m0_hat: Counterfactual baseline trend via dual-classification:
+                m0_hat(X) = P(Readmitted_post = 1 | Control, X) - Y_pre (100 control in-context anchors)
 
     Computes Sant'Anna & Zhao (2020) ATT with self-normalized (Hajek) weights and bootstrap SE.
     """
@@ -285,7 +320,7 @@ def run_kumo_dr_did(
     if not api_key:
         raise ValueError("NVIDIA_API_KEY environment variable is required to run Kumo RFM.")
 
-    print(f"[*] Kumo Relational Model (RFM) DR-DiD — Target cohort: {sample_size} patients (NVIDIA NIM cloud API)")
+    print(f"[*] Kumo Relational Foundation Model (RFM) DR-DiD — Target cohort: {sample_size:,} patients (NVIDIA NIM cloud API)")
 
     # 1. Stratified evaluation cohort
     rng = np.random.RandomState(random_state)
@@ -298,24 +333,31 @@ def run_kumo_dr_did(
     eval_pids = np.concatenate([eval_ctrl, eval_trt])
     rng.shuffle(eval_pids)
 
-    # 2. Context pool (100 patients: 50 ctrl, 50 trt for clf; 80 ctrl for reg)
+    # 2. Context pools
     rem_ctrl = np.setdiff1d(ctrl_pool, eval_pids)
     rem_trt = np.setdiff1d(trt_pool, eval_pids)
+
+    # Propensity context: 50 ctrl, 50 trt
     ctx_ctrl = rng.choice(rem_ctrl, 50, replace=False)
     ctx_trt = rng.choice(rem_trt, 50, replace=False)
     ctx_pids_clf = np.concatenate([ctx_ctrl, ctx_trt]).tolist()
-    # For outcome regression, context is purely control units
-    ctx_pids_reg = rng.choice(rem_ctrl, 80, replace=False).tolist()
 
-    all_query_pids = list(set(eval_pids.tolist() + ctx_pids_clf + ctx_pids_reg))
+    # Counterfactual outcome context: 50 readmitted, 50 not readmitted among control pool
+    ctrl_df = df_wide[df_wide["patient_nbr"].isin(rem_ctrl)]
+    c_pos = ctrl_df[ctrl_df["readmitted_30d_post"] == 1]["patient_nbr"].values
+    c_neg = ctrl_df[ctrl_df["readmitted_30d_post"] == 0]["patient_nbr"].values
+    ctx_pids_post = np.concatenate([rng.choice(c_neg, 50, replace=False), rng.choice(c_pos, 50, replace=False)]).tolist()
+
+    all_query_pids = list(set(eval_pids.tolist() + ctx_pids_clf + ctx_pids_post))
     pids_str = ",".join(str(p) for p in all_query_pids)
 
-    # 3. Pull relational data from SQLite
-    print(f"[*] Extracting relational graph from {db_path} for {len(all_query_pids):,} patients...")
+    # 3. Pull 4-table relational data from SQLite
+    print(f"[*] Extracting 4-table relational graph from {db_path} for {len(all_query_pids):,} patients...")
     conn = sqlite3.connect(db_path)
     pat_df = pd.read_sql_query(f"SELECT patient_nbr, race, gender, age FROM patients WHERE patient_nbr IN ({pids_str})", conn)
     enc_df = pd.read_sql_query(f"SELECT encounter_id, patient_nbr, time_in_hospital, num_lab_procedures, num_medications, number_emergency, number_inpatient, number_diagnoses FROM encounters WHERE patient_nbr IN ({pids_str})", conn)
     med_df = pd.read_sql_query(f"SELECT id, encounter_id, patient_nbr, drug_name, status, is_dosage_change FROM medications WHERE patient_nbr IN ({pids_str})", conn)
+    diag_df = pd.read_sql_query(f"SELECT id, encounter_id, patient_nbr, category, icd9_code FROM diagnoses WHERE patient_nbr IN ({pids_str})", conn)
     conn.close()
 
     pat_map = {r["patient_nbr"]: r for _, r in pat_df.iterrows()}
@@ -325,20 +367,18 @@ def run_kumo_dr_did(
     med_map = {}
     for _, r in med_df.iterrows():
         med_map.setdefault(r["patient_nbr"], []).append(r)
+    diag_map = {}
+    for _, r in diag_df.iterrows():
+        diag_map.setdefault(r["patient_nbr"], []).append(r)
     panel_map = {r["patient_nbr"]: r for _, r in df_wide[df_wide["patient_nbr"].isin(all_query_pids)].iterrows()}
 
-    # 4. Run Kumo RFM in batches
+    # 4. Run Kumo RFM in parallel batches
     n_batches = int(np.ceil(len(eval_pids) / batch_size))
-    print(f"[*] Querying Kumo RFM across {n_batches} batches ({batch_size} patients/batch)...")
+    batches = [eval_pids[b * batch_size : (b + 1) * batch_size].tolist() for b in range(n_batches)]
+    print(f"[*] Querying Kumo RFM across {n_batches} batches ({batch_size} patients/batch) on {max_workers} threads...")
 
-    e_hat_dict = {}
-    m0_hat_dict = {}
-    t0 = time.time()
-
-    for b in range(n_batches):
-        batch_targets = eval_pids[b * batch_size : (b + 1) * batch_size].tolist()
-
-        # A. Propensity Score Query (Binary Classification)
+    def _process_batch(batch_targets):
+        # A. Propensity Score Query: P(Treatment = 1 | Relational History)
         payload_clf = _build_kumo_payload(
             ctx_ids=ctx_pids_clf,
             pred_ids=batch_targets,
@@ -346,33 +386,52 @@ def run_kumo_dr_did(
             pat_map=pat_map,
             enc_map=enc_map,
             med_map=med_map,
-            task_kind="binary_classification",
+            diag_map=diag_map,
+            target_field="treatment",
         )
         res_clf = _query_kumo_nim(payload_clf, api_key)
+        b_e = {}
         for pred in res_clf["predictions"]:
             orig_idx = int(pred["id"]) - len(ctx_pids_clf)
             target_pid = batch_targets[orig_idx]
-            p_true = pred["probabilities"]["true"]
-            e_hat_dict[target_pid] = np.clip(p_true, 0.05, 0.95)
+            b_e[target_pid] = np.clip(pred["probabilities"]["true"], 0.05, 0.95)
 
-        # B. Baseline Outcome Regression Query
-        payload_reg = _build_kumo_payload(
-            ctx_ids=ctx_pids_reg,
+        # B. Counterfactual Baseline Outcome Query: P(Readmitted_post = 1 | Control, Relational History)
+        payload_out = _build_kumo_payload(
+            ctx_ids=ctx_pids_post,
             pred_ids=batch_targets,
             panel_map=panel_map,
             pat_map=pat_map,
             enc_map=enc_map,
             med_map=med_map,
-            task_kind="regression",
+            diag_map=diag_map,
+            target_field="readmitted_30d_post",
         )
-        res_reg = _query_kumo_nim(payload_reg, api_key)
-        for pred in res_reg["predictions"]:
-            orig_idx = int(pred["id"]) - len(ctx_pids_reg)
+        res_out = _query_kumo_nim(payload_out, api_key)
+        b_m0 = {}
+        for pred in res_out["predictions"]:
+            orig_idx = int(pred["id"]) - len(ctx_pids_post)
             target_pid = batch_targets[orig_idx]
-            m0_hat_dict[target_pid] = float(pred["prediction"])
+            p_post = pred["probabilities"]["true"]
+            y_pre = float(panel_map[target_pid]["readmitted_30d_pre"])
+            b_m0[target_pid] = p_post - y_pre
 
-        if (b + 1) % 6 == 0 or (b + 1) == n_batches:
-            print(f"    [batch {b+1}/{n_batches}] Completed {len(e_hat_dict)} patients in {time.time() - t0:.1f}s")
+        return b_e, b_m0
+
+    e_hat_dict = {}
+    m0_hat_dict = {}
+    t0 = time.time()
+    completed = 0
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(_process_batch, batch): b for b, batch in enumerate(batches)}
+        for fut in as_completed(futures):
+            b_e, b_m0 = fut.result()
+            e_hat_dict.update(b_e)
+            m0_hat_dict.update(b_m0)
+            completed += 1
+            if completed % 20 == 0 or completed == n_batches:
+                print(f"    [Progress: {completed}/{n_batches} batches] Completed {len(e_hat_dict):,} patients in {time.time() - t0:.1f}s")
 
     # 5. Compute Sant'Anna & Zhao Doubly Robust ATT with Hajek Normalization
     N = len(eval_pids)
@@ -433,5 +492,5 @@ def run_kumo_dr_did(
 
 if __name__ == "__main__":
     df = pd.read_csv("data/panel_patient_level.csv")
-    res = run_kumo_dr_did(df, sample_size=100, batch_size=25)
+    res = run_kumo_dr_did(df, sample_size=100, batch_size=25, max_workers=2)
     print(res)

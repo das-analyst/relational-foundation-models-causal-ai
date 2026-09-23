@@ -48,14 +48,14 @@
   },
   {
     "model": "5. Kumo Relational Foundation Model DR-DiD",
-    "estimate": -0.01331584,
-    "std_error": 0.02072688,
-    "ci_lower": -0.05394053,
-    "ci_upper": 0.02730886,
-    "p_value": 0.52059385,
-    "se_asymptotic": 0.02100849,
-    "n_patients": 3000,
+    "estimate": 0.0001878,
+    "std_error": 0.006368,
+    "ci_lower": -0.01230,
+    "ci_upper": 0.01267,
+    "p_value": 0.9765,
+    "se_asymptotic": 0.00970,
+    "n_patients": 12000,
     "bootstrap_B": 500,
-    "propensity_mean": 0.49852
+    "propensity_mean": 0.49982
   }
 ]
