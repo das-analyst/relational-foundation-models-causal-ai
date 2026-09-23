@@ -1,0 +1,43 @@
+[
+  {
+    "model": "1. Na\u00efve 2x2 DiD (Unadjusted)",
+    "estimate": -0.003936727368719153,
+    "std_error": 0.008387521072446736,
+    "ci_lower": -0.020376268670714758,
+    "ci_upper": 0.01250281393327645,
+    "p_value": 0.6388157022213345,
+    "n_treated": 8070,
+    "n_control": 8703
+  },
+  {
+    "model": "2. TWFE OLS DiD (Linear Controls)",
+    "estimate": -0.003936727369046903,
+    "std_error": 0.008390771972092972,
+    "ci_lower": -0.020382640434349127,
+    "ci_upper": 0.012509185696255322,
+    "p_value": 0.6389456669609239,
+    "n_obs": 33546,
+    "n_patients": 16773
+  },
+  {
+    "model": "3. TabPFN Doubly Robust DiD",
+    "estimate": 0.0324813230586851,
+    "std_error": 0.04506440839003103,
+    "ci_lower": -0.05584491738577572,
+    "ci_upper": 0.12080756350314592,
+    "p_value": 0.4710476301516864,
+    "n_patients": 2500,
+    "propensity_mean": 0.4849671372052977
+  },
+  {
+    "model": "4. RelBench Relational Graph DiD",
+    "estimate": -0.03572581162054489,
+    "std_error": 0.013727899381332476,
+    "ci_lower": -0.06263249440795654,
+    "ci_upper": -0.008819128833133238,
+    "p_value": 0.009256739239495104,
+    "n_patients": 16773,
+    "n_features": 35,
+    "propensity_mean": 0.4828879582479386
+  }
+]
