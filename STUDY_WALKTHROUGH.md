@@ -23,7 +23,7 @@ In this study, we investigated:
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **1. Naïve 2x2 DiD** | Unadjusted Baseline | **-0.394% pts** | 0.839% | [-2.038%, +1.250%] | 0.6388 | Not Significant |
 | **2. TWFE OLS DiD** | Classical Econometrics | **-0.394% pts** | 0.839% | [-2.038%, +1.251%] | 0.6389 | Not Significant |
-| **3. TabPFN Doubly Robust DiD** | Tabular Foundation Model | **+3.248% pts** | 4.506% | [-5.584%, +12.081%] | 0.4710 | Not Significant |
+| **3. TabPFN Doubly Robust DiD** | Tabular Foundation Model | **-0.295% pts** | 0.943%† | [-2.143%, +1.554%] | 0.7546 | Not Significant |
 | **4. RelBench Relational Graph DiD** | **Relational Deep Learning** | **-3.573% pts** | **1.373%** | **[-6.263%, -0.882%]** | **0.0093** | **p < 0.01 (Statistically Significant)** |
 
 ### Comparative Forest Plot
@@ -103,8 +103,10 @@ $$V_{\text{cluster}} = (X'X)^{-1} \left( \sum_{g} X_g' u_g u_g' X_g \right) (X'X
 For change in outcome $\Delta Y_i = Y_{i, \text{post}} - Y_{i, \text{pre}}$:
 $$\hat{\tau}_{\text{DR}} = \frac{1}{\sum_{i} D_i} \sum_{i=1}^N \left[ D_i (\Delta Y_i - \hat{\mu}_0(X_i)) - \frac{\hat{e}(X_i) (1 - D_i)}{1 - \hat{e}(X_i)} (\Delta Y_i - \hat{\mu}_0(X_i)) \right]$$
 
-* **TabPFN DiD**: Uses `TabPFNClassifier` for $\hat{e}(X)$ and `TabPFNRegressor` for $\hat{\mu}_0(X)$ with 3-fold cross-fitting.
+* **TabPFN DiD**: Uses `TabPFNClassifier` for $\hat{e}(X)$ and `TabPFNRegressor` for $\hat{\mu}_0(X)$ with **5-fold cross-fitting** on the **full cohort of 16,773 patients**. Standard errors are computed via **non-parametric bootstrap (B=500)** for robustness — more reliable than the asymptotic influence-function SE when per-fold validation samples are small. If the `TABPFN_TOKEN` environment variable is set and the Prior-Labs license server is reachable, the actual TabPFN transformer in-context learning model is used; otherwise, a `HistGradientBoosting` fallback runs on the full dataset.
 * **RelBench Graph DiD**: Uses multi-table relational graph message passing to build $\mathbf{z}_i \in \mathbb{R}^d$ across connected prescriptions and diagnosis clusters, feeding $\mathbf{z}_i$ into the Doubly Robust estimator.
+
+> †Bootstrap SE (B=500) on n=16,773 patients, 5-fold cross-fit. Asymptotic influence-function SE: 0.956% (p=0.758). In the current run, `HistGradientBoosting` nuisance models were used on the full dataset (TabPFN license server was unreachable at run time).
 
 ---
 
@@ -112,11 +114,15 @@ $$\hat{\tau}_{\text{DR}} = \frac{1}{\sum_{i} D_i} \sum_{i=1}^N \left[ D_i (\Delt
 
 ```bash
 # Clone the repository
-git clone <REPO_URL>
-cd clinical-trial-did-ml
+git clone https://github.com/das-analyst/relational-foundation-models-causal-ai.git
+cd relational-foundation-models-causal-ai
 
 # Install dependencies
-pip install -r requirements.txt # or pip install scikit-learn matplotlib scipy tabpfn torch
+pip install -r requirements.txt
+
+# (Optional) set your TabPFN API key to use the transformer model
+export TABPFN_TOKEN="tabpfn_sk_..."   # Linux/macOS
+# $env:TABPFN_TOKEN = "tabpfn_sk_..."  # Windows PowerShell
 
 # Run the end-to-end benchmark
 python run_experiment.py

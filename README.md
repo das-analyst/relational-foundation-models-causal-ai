@@ -21,7 +21,7 @@ We evaluated the causal impact of an **inpatient medication titration protocol**
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **1. Naïve 2x2 DiD** | Unadjusted Baseline | **-0.394% pts** | [-2.038%, +1.250%] | 0.6388 | **Insignificant**: Masked by severe confounding by indication. |
 | **2. TWFE OLS DiD** | Classical Econometrics | **-0.394% pts** | [-2.038%, +1.251%] | 0.6389 | **Insignificant**: Linear controls fail to untangle multi-table non-linear comorbidities. |
-| **3. TabPFN Doubly Robust DiD** | Tabular Foundation Model | **+3.248% pts** | [-5.584%, +12.081%] | 0.4710 | Captures non-linear decision boundaries; high variance on token-restricted subsample. |
+| **3. TabPFN Doubly Robust DiD** | Tabular Foundation Model | **-0.295% pts** | [-2.143%, +1.554%] | 0.7546 | Full-dataset DR-DiD (n=16,773, 5-fold, bootstrap SE); nuisance models via HGBT (TabPFN weights pending license server connectivity). |
 | **4. RelBench Relational Graph DiD** | **Relational Deep Learning** | **-3.573% pts** | **[-6.263%, -0.882%]** | **0.0093** | **Statistically Significant ($p < 0.01$)**: Multi-table graph representation uncovers a **3.57% readmission reduction**! |
 
 ---
@@ -48,6 +48,29 @@ This single command will:
 3. Extract longitudinal cohorts with strict pre-intervention temporal cutoffs ($t \le T_0$).
 4. Fit all 4 estimators (Naïve DiD, TWFE OLS, TabPFN DR-DiD, RelBench Graph DR-DiD).
 5. Generate publication-ready figures in `output/`.
+
+### 3. (Optional) Unlock TabPFN Transformer Weights
+
+The TabPFN estimator runs with a `HistGradientBoosting` fallback by default. To use the actual
+TabPFN in-context learning transformer weights:
+
+1. Register and accept the license at **https://ux.priorlabs.ai** (Licenses tab).
+2. Copy your API key from **https://ux.priorlabs.ai/account**.
+3. Set the environment variable before running:
+
+```bash
+# Linux / macOS
+export TABPFN_TOKEN="tabpfn_sk_..."
+python run_experiment.py
+
+# Windows PowerShell
+$env:TABPFN_TOKEN = "tabpfn_sk_..."
+python run_experiment.py
+```
+
+The script will automatically detect the token and attempt to download the model weights
+(`Prior-Labs/tabpfn_3_5` on HuggingFace). If the license server is reachable, each fold will
+log `-> TabPFN local OK` instead of `-> HGBT`.
 
 ---
 
