@@ -87,7 +87,7 @@ def main():
     # Step 8: Model 5 - Kumo Relational Foundation Model (RFM) DiD
     print("\n" + "-" * 60)
     print("[5/5] Running Kumo Relational Foundation Model DiD (NVIDIA Cloud NIM)...")
-    res_kumo = run_kumo_dr_did(df_wide, db_path=db_path, sample_size=1200, batch_size=50)
+    res_kumo = run_kumo_dr_did(df_wide, db_path=db_path, sample_size=3000, batch_size=100)
     results.append(res_kumo)
     print(f"      Estimate: {res_kumo['estimate']*100:.3f}% pts | SE: {res_kumo['std_error']*100:.3f}% pts | p: {res_kumo['p_value']:.4f}")
 

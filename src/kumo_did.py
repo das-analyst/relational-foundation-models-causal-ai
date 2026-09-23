@@ -267,8 +267,8 @@ def _query_kumo_nim(payload: dict, api_key: str, max_retries: int = 3) -> dict:
 def run_kumo_dr_did(
     df_wide: pd.DataFrame,
     db_path: str = "data/clinical_trial.db",
-    sample_size: int = 1200,
-    batch_size: int = 50,
+    sample_size: int = 3000,
+    batch_size: int = 100,
     bootstrap_B: int = 500,
     random_state: int = 42,
 ) -> dict:
