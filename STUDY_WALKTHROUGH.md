@@ -100,13 +100,114 @@ Standard errors are clustered at the patient level ($i$) to account for within-p
 $$V_{\text{cluster}} = (X'X)^{-1} \left( \sum_{g} X_g' u_g u_g' X_g \right) (X'X)^{-1}$$
 
 ### 3. Sant'Anna & Zhao (2020) Doubly Robust DiD (DR-DiD)
-For change in outcome $\Delta Y_i = Y_{i, \text{post}} - Y_{i, \text{pre}}$:
-$$\hat{\tau}_{\text{DR}} = \frac{1}{\sum_{i} D_i} \sum_{i=1}^N \left[ D_i (\Delta Y_i - \hat{\mu}_0(X_i)) - \frac{\hat{e}(X_i) (1 - D_i)}{1 - \hat{e}(X_i)} (\Delta Y_i - \hat{\mu}_0(X_i)) \right]$$
 
-* **TabPFN DiD**: Uses `TabPFNClassifier` for $\hat{e}(X)$ and `TabPFNRegressor` for $\hat{\mu}_0(X)$ with **5-fold cross-fitting** on the **full cohort of 16,773 patients**. Standard errors are computed via **non-parametric bootstrap (B=500)** for robustness — more reliable than the asymptotic influence-function SE when per-fold validation samples are small. If the `TABPFN_TOKEN` environment variable is set and the Prior-Labs license server is reachable, the actual TabPFN transformer in-context learning model is used; otherwise, a `HistGradientBoosting` fallback runs on the full dataset.
-* **RelBench Graph DiD**: Uses multi-table relational graph message passing to build $\mathbf{z}_i \in \mathbb{R}^d$ across connected prescriptions and diagnosis clusters, feeding $\mathbf{z}_i$ into the Doubly Robust estimator.
+#### Why Do We Need "Doubly Robust"?
 
-> †Bootstrap SE (B=500) on n=16,773 patients, 5-fold cross-fit. Asymptotic influence-function SE: 0.956% (p=0.758). In the current run, `HistGradientBoosting` nuisance models were used on the full dataset (TabPFN license server was unreachable at run time).
+Standard DiD compares the *change* in outcomes between treated and control groups. The problem in healthcare data is **confounding by indication**: sicker patients are more likely to receive treatment, so naïve comparisons confuse the selection effect with the treatment effect.
+
+DR-DiD fixes this with **two independent safety nets**:
+
+| Safety Net | What It Does | Model Used |
+| :--- | :--- | :--- |
+| **Propensity model** $\hat{e}(X)$ | Estimates the probability each patient would receive treatment, given their characteristics | TabPFN Classifier |
+| **Outcome model** $\hat{\mu}_0(X)$ | Estimates what the change in readmissions *would have been* for a patient with characteristics $X$, if they had been in the control group | TabPFN Regressor |
+
+The "doubly robust" guarantee: **even if one of the two models is mis-specified, the ATT estimate is still consistent** — as long as the other model is correct. You only need one to be right.
+
+---
+
+#### Step-by-Step Intuitive Logic
+
+**Step 1 — Compute the change in outcome for each patient**
+
+For each patient $i$, compute the before–after difference:
+
+$$
+\Delta Y_i = Y_{i,\text{post}} - Y_{i,\text{pre}}
+$$
+
+This collapses the panel into a single number per patient: *did their readmission probability go up or down?*
+
+---
+
+**Step 2 — Fit the propensity score** $\hat{e}(X_i)$
+
+$$
+\hat{e}(X_i) = \hat{\mathbb{P}}(D_i = 1 \mid X_i)
+$$
+
+This answers: *"Given patient $i$'s demographics, admission severity, and comorbidity history — how likely were they to receive the medication titration protocol?"*
+
+Patients with high $\hat{e}$ were nearly certain to be treated. Patients with low $\hat{e}$ were nearly certain to be controls. The model uses this to **rebalance the control group** so it looks like the treated group in expectation.
+
+---
+
+**Step 3 — Fit the baseline outcome model** $\hat{\mu}_0(X_i)$
+
+$$
+\hat{\mu}_0(X_i) = \hat{\mathbb{E}}[\Delta Y_i \mid D_i = 0,\, X_i]
+$$
+
+This answers: *"For a patient with characteristics $X_i$, what change in readmission rate would we expect if they had received standard care (control)?"*
+
+This prediction is the **counterfactual baseline trend**: how much readmissions would have changed anyway, absent any treatment effect.
+
+---
+
+**Step 4 — Compute the influence function for each patient**
+
+Subtract the predicted baseline trend from each patient's observed change. Then reweight the control group using the odds of treatment $\hat{e}/(1-\hat{e})$:
+
+$$
+\psi_i = \underbrace{D_i \bigl(\Delta Y_i - \hat{\mu}_0(X_i)\bigr)}_{\text{treated: residual above baseline}} \;-\; \underbrace{\frac{\hat{e}(X_i)(1-D_i)}{1-\hat{e}(X_i)} \bigl(\Delta Y_i - \hat{\mu}_0(X_i)\bigr)}_{\text{control: reweighted to match treated}}
+$$
+
+- **Treated patients ($D_i=1$)**: their $\Delta Y_i - \hat{\mu}_0$ measures how much *extra* improvement they got beyond what the outcome model predicts for a similar control patient.
+- **Control patients ($D_i=0$)**: they are upweighted by $\hat{e}/(1-\hat{e})$ (similar to IPW) so the comparison population mirrors the treated group's covariate distribution.
+
+---
+
+**Step 5 — Average over all patients to get the ATT**
+
+$$
+\hat{\tau}_{\text{DR}} = \frac{1}{N} \sum_{i=1}^{N} \psi_i \;\bigg/\; \bar{D}
+$$
+
+where $\bar{D} = N^{-1}\sum_i D_i$ is the share of treated patients (used to normalize).
+
+The standard error is computed over the individual $\psi_i$ scores — this is the **influence function / sandwich estimator**:
+
+$$
+\widehat{\text{SE}} = \frac{\text{std}(\psi_i)}{\sqrt{N}}
+$$
+
+In this benchmark, we additionally use **non-parametric bootstrap (B=500)** on the $\psi_i$ scores for a more robust SE that doesn't rely on the asymptotic normal approximation.
+
+---
+
+#### Cross-Fitting: Why We Split the Data Into Folds
+
+If we trained $\hat{e}$ and $\hat{\mu}_0$ on the same data we use to evaluate $\psi_i$, the model would overfit and produce biased estimates (a form of regularization bias). **5-fold cross-fitting** solves this:
+
+```
+Fold 0   [Train on folds 1–4] → predict ψ on fold 0
+Fold 1   [Train on folds 0,2–4] → predict ψ on fold 1
+  ...
+Fold 4   [Train on folds 0–3] → predict ψ on fold 4
+```
+
+Each patient's $\psi_i$ is always computed using a model **trained on held-out data**, giving honest out-of-sample estimates that remove regularization bias.
+
+---
+
+#### Implementation in This Benchmark
+
+- **TabPFN DiD**: Uses `TabPFNClassifier` for $\hat{e}(X)$ and `TabPFNRegressor` for $\hat{\mu}_0(X)$ with 5-fold cross-fitting on the full 16,773-patient cohort. Bootstrap SE (B=500). If `TABPFN_TOKEN` is set and the Prior-Labs license server is reachable, the actual TabPFN in-context learning transformer is used; otherwise a `HistGradientBoosting` fallback runs on the full dataset.
+- **RelBench Graph DiD**: Augments $X_i$ with 10 relational graph features extracted from the multi-table SQLite schema (medication titration graph degree, comorbidity cluster entropy, etc.), then feeds $X_i^{\text{graph}} \in \mathbb{R}^{35}$ into the same DR-DiD estimator.
+
+> **†** Bootstrap SE (B=500) on n=16,773 patients, 5-fold cross-fit. Asymptotic influence-function SE: 0.956% (p=0.758). In the current run, `HistGradientBoosting` nuisance models were used on the full dataset (TabPFN license server was unreachable at run time).
+
+
 
 ---
 
