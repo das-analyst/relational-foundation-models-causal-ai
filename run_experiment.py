@@ -23,13 +23,14 @@ from panel_prep import prepare_did_panel
 from traditional_did import run_naive_did, run_twfe_ols_did
 from tabpfn_did import run_tabpfn_dr_did
 from relbench_graph import run_relational_graph_did
+from kumo_did import run_kumo_dr_did
 from visualize import plot_parallel_trends, plot_propensity_overlap, plot_model_comparison
 
 def main():
     start_time = time.time()
     print("=" * 80)
     print(" CLINICAL QUALITY & RELATIONAL DIFFERENCE-IN-DIFFERENCES BENCHMARK")
-    print(" Comparing: Traditional DiD vs. TabPFN vs. RelBench Relational Graph DiD")
+    print(" Comparing: Traditional DiD vs. TabPFN vs. RelBench vs. Kumo RFM")
     print("=" * 80)
 
     # Step 1: Fetch Public Dataset
@@ -78,19 +79,26 @@ def main():
 
     # Step 7: Model 4 - RelBench Relational Graph DiD
     print("\n" + "-" * 60)
-    print("[4/4] Running RelBench Relational Graph DiD (Multi-Table Graph Embeddings)...")
+    print("[4/5] Running RelBench Relational Graph DiD (Multi-Table Graph Embeddings)...")
     res_relbench = run_relational_graph_did(df_wide, db_path=db_path)
     results.append(res_relbench)
     print(f"      Estimate: {res_relbench['estimate']*100:.3f}% pts | SE: {res_relbench['std_error']*100:.3f}% pts | p: {res_relbench['p_value']:.4f}")
 
-    # Step 8: Visualizations
+    # Step 8: Model 5 - Kumo Relational Foundation Model (RFM) DiD
+    print("\n" + "-" * 60)
+    print("[5/5] Running Kumo Relational Foundation Model DiD (NVIDIA Cloud NIM)...")
+    res_kumo = run_kumo_dr_did(df_wide, db_path=db_path, sample_size=600, batch_size=30)
+    results.append(res_kumo)
+    print(f"      Estimate: {res_kumo['estimate']*100:.3f}% pts | SE: {res_kumo['std_error']*100:.3f}% pts | p: {res_kumo['p_value']:.4f}")
+
+    # Step 9: Visualizations
     print("\n" + "-" * 60)
     print("[*] Generating Publication-Ready Visualizations...")
     plot_parallel_trends(df_wide, "output/parallel_trends.png")
     plot_propensity_overlap(res_tabpfn['propensity_scores'], res_tabpfn['treated_mask'], "output/propensity_overlap.png")
     plot_model_comparison(results, "output/model_comparison_forest_plot.png")
 
-    # Step 9: Save Benchmark Metrics
+    # Step 10: Save Benchmark Metrics
     os.makedirs("output", exist_ok=True)
     clean_results = []
     for r in results:

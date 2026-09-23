@@ -71,7 +71,7 @@ def plot_propensity_overlap(propensity_scores: np.ndarray, treated_mask: np.ndar
 
 def plot_model_comparison(results_list: list, output_path: str = "output/model_comparison_forest_plot.png"):
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    fig, ax = plt.subplots(figsize=(9, 5), dpi=300)
+    fig, ax = plt.subplots(figsize=(10, 6), dpi=300)
 
     models = [r['model'] for r in results_list]
     estimates = [r['estimate'] * 100 for r in results_list] # convert to percentage points
@@ -86,13 +86,14 @@ def plot_model_comparison(results_list: list, output_path: str = "output/model_c
         [up - est for est, up in zip(estimates, ci_uppers)]
     ]
 
-    colors = ['#8E9AAF', '#4A90E2', '#50C878', '#2E7D32']
+    colors = ['#8E9AAF', '#4A90E2', '#00897B', '#2E7D32', '#8E24AA']
 
     ax.axvline(0, color='gray', linestyle='--', linewidth=1.2, alpha=0.7)
 
     for i in range(len(models)):
+        col = colors[i % len(colors)]
         ax.errorbar(estimates[i], y_pos[i], xerr=[[xerr[0][i]], [xerr[1][i]]], 
-                    fmt='o', color=colors[i % len(colors)], ecolor=colors[i % len(colors)],
+                    fmt='o', color=col, ecolor=col,
                     elinewidth=2.5, capsize=5, markersize=8, label=models[i])
         # Annotate estimate value
         sign = "+" if estimates[i] > 0 else ""
@@ -100,10 +101,10 @@ def plot_model_comparison(results_list: list, output_path: str = "output/model_c
                 ha='center', fontsize=9.5, fontweight='bold')
 
     ax.set_yticks(y_pos)
-    ax.set_yticklabels(models, fontsize=11, fontweight='bold')
+    ax.set_yticklabels(models, fontsize=10.5, fontweight='bold')
     ax.invert_yaxis()  # top-down order
     ax.set_xlabel('Estimated Average Treatment Effect on Treated (ATT) on 30d Readmission (% points)', fontsize=11, fontweight='bold')
-    ax.set_title('Head-to-Head Comparison: Traditional DiD vs. TabPFN vs. RelBench', fontsize=13, fontweight='bold', pad=15)
+    ax.set_title('Head-to-Head Comparison: Traditional DiD vs. TabPFN vs. RelBench vs. Kumo RFM', fontsize=12.5, fontweight='bold', pad=15)
 
     plt.tight_layout()
     plt.savefig(output_path)

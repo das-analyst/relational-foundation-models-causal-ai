@@ -1,9 +1,9 @@
-# Clinical Quality & Relational DiD: TabPFN & RelBench vs. Traditional DiD
+# Clinical Quality & Relational DiD: TabPFN, RelBench & Kumo RFM vs. Traditional DiD
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A causal inference benchmark evaluating **TabPFN** (Tabular Foundation Model) and **RelBench** (Relational Deep Learning) against **Traditional Difference-in-Differences (DiD)** on real-world clinical quality, medication adherence, and hospital readmissions data.
+A causal inference benchmark evaluating **TabPFN** (Tabular Foundation Model), **RelBench** (Relational Deep Learning), and **Kumo Relational Foundation Model (RFM)** against **Traditional Difference-in-Differences (DiD)** on real-world clinical quality, medication adherence, and hospital readmissions data.
 
 📖 **Read the full scientific report**: [STUDY_WALKTHROUGH.md](./STUDY_WALKTHROUGH.md)
 
@@ -23,6 +23,7 @@ We evaluated the causal impact of an **inpatient medication titration protocol**
 | **2. TWFE OLS DiD** | Classical Econometrics | **-0.394% pts** | [-2.038%, +1.251%] | 0.6389 | **Insignificant**: Linear controls fail to untangle multi-table non-linear comorbidities. |
 | **3. TabPFN Doubly Robust DiD** | Tabular Foundation Model | **-0.295% pts** | [-2.143%, +1.554%] | 0.7546 | Full-dataset DR-DiD (n=16,773, 5-fold, bootstrap SE); nuisance models via HGBT (TabPFN weights pending license server connectivity). |
 | **4. RelBench Relational Graph DiD** | **Relational Deep Learning** | **-3.573% pts** | **[-6.263%, -0.882%]** | **0.0093** | **Statistically Significant ($p < 0.01$)**: Multi-table graph representation uncovers a **3.57% readmission reduction**! |
+| **5. Kumo Relational Foundation Model DiD** | **Relational Foundation Model (RFM)** | **+3.136% pts** | [-8.285%, +14.557%] | 0.5905 | Multi-table in-context learning via NVIDIA NIM API (`patients`, `encounters`, `medications`); wide CI on 600-patient cloud evaluation batch. |
 
 ---
 
@@ -90,6 +91,7 @@ clinical-trial-did-ml/
 │   ├── traditional_did.py    # Naïve 2x2 DiD & TWFE OLS DiD
 │   ├── tabpfn_did.py         # TabPFN Doubly Robust DiD estimator
 │   ├── relbench_graph.py     # RelBench multi-table graph representation
+│   ├── kumo_did.py           # Kumo Relational Model (NVIDIA NIM cloud API)
 │   └── visualize.py          # Visualization suite
 ├── output/
 │   ├── benchmark_results.json

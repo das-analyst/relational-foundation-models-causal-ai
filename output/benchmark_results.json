@@ -21,13 +21,19 @@
   },
   {
     "model": "3. TabPFN Doubly Robust DiD",
-    "estimate": 0.0324813230586851,
-    "std_error": 0.04506440839003103,
-    "ci_lower": -0.05584491738577572,
-    "ci_upper": 0.12080756350314592,
-    "p_value": 0.4710476301516864,
-    "n_patients": 2500,
-    "propensity_mean": 0.4849671372052977
+    "estimate": -0.002947993645926047,
+    "std_error": 0.009430880252185633,
+    "ci_lower": -0.021432518940209887,
+    "ci_upper": 0.015536531648357792,
+    "p_value": 0.7545925964482441,
+    "se_asymptotic": 0.009560025643951734,
+    "ci_lower_asym": -0.021685643908071445,
+    "ci_upper_asym": 0.01578965661621935,
+    "p_value_asym": 0.7578033108465405,
+    "n_patients": 16773,
+    "n_folds": 5,
+    "bootstrap_B": 500,
+    "propensity_mean": 0.4817177444417761
   },
   {
     "model": "4. RelBench Relational Graph DiD",
@@ -39,5 +45,17 @@
     "n_patients": 16773,
     "n_features": 35,
     "propensity_mean": 0.4828879582479386
+  },
+  {
+    "model": "5. Kumo Relational Foundation Model DR-DiD",
+    "estimate": 0.031357866278565405,
+    "std_error": 0.05827126921625511,
+    "ci_lower": -0.08285382138529461,
+    "ci_upper": 0.14556955394242543,
+    "p_value": 0.5904831775762993,
+    "se_asymptotic": 0.056483934304824415,
+    "n_patients": 600,
+    "bootstrap_B": 500,
+    "propensity_mean": 0.4919700848062833
   }
 ]

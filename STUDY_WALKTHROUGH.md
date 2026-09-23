@@ -25,6 +25,7 @@ In this study, we investigated:
 | **2. TWFE OLS DiD** | Classical Econometrics | **-0.394% pts** | 0.839% | [-2.038%, +1.251%] | 0.6389 | Not Significant |
 | **3. TabPFN Doubly Robust DiD** | Tabular Foundation Model | **-0.295% pts** | 0.943%† | [-2.143%, +1.554%] | 0.7546 | Not Significant |
 | **4. RelBench Relational Graph DiD** | **Relational Deep Learning** | **-3.573% pts** | **1.373%** | **[-6.263%, -0.882%]** | **0.0093** | **p < 0.01 (Statistically Significant)** |
+| **5. Kumo Relational Foundation Model DiD** | **Relational Foundation Model (RFM)** | **+3.136% pts** | 5.827% | [-8.285%, +14.557%] | 0.5905 | Not Significant (NVIDIA NIM cloud batch, n=600) |
 
 ### Comparative Forest Plot
 ![Model Comparison Forest Plot](./output/model_comparison_forest_plot.png)
@@ -204,10 +205,9 @@ Each patient's $\psi_i$ is always computed using a model **trained on held-out d
 
 - **TabPFN DiD**: Uses `TabPFNClassifier` for $\hat{e}(X)$ and `TabPFNRegressor` for $\hat{\mu}_0(X)$ with 5-fold cross-fitting on the full 16,773-patient cohort. Bootstrap SE (B=500). If `TABPFN_TOKEN` is set and the Prior-Labs license server is reachable, the actual TabPFN in-context learning transformer is used; otherwise a `HistGradientBoosting` fallback runs on the full dataset.
 - **RelBench Graph DiD**: Augments $X_i$ with 10 relational graph features extracted from the multi-table SQLite schema (medication titration graph degree, comorbidity cluster entropy, etc.), then feeds $X_i^{\text{graph}} \in \mathbb{R}^{35}$ into the same DR-DiD estimator.
+- **Kumo Relational Foundation Model DiD**: Direct in-context relational deep learning querying NVIDIA's Kumo NIM structured data microservice. Streams multi-table subgraphs (`patients`, `encounters`, `medications`) without table flattening. Queries Kumo for relational propensity $\hat{e}_{\text{Kumo}}(X)$ (binary classification) and counterfactual baseline trend $\hat{\mu}_{0,\text{Kumo}}(X)$ (regression) across 20 relational batches, evaluating on a 600-patient stratified cohort.
 
 > **†** Bootstrap SE (B=500) on n=16,773 patients, 5-fold cross-fit. Asymptotic influence-function SE: 0.956% (p=0.758). In the current run, `HistGradientBoosting` nuisance models were used on the full dataset (TabPFN license server was unreachable at run time).
-
-
 
 ---
 
@@ -221,10 +221,14 @@ cd relational-foundation-models-causal-ai
 # Install dependencies
 pip install -r requirements.txt
 
-# (Optional) set your TabPFN API key to use the transformer model
-export TABPFN_TOKEN="tabpfn_sk_..."   # Linux/macOS
-# $env:TABPFN_TOKEN = "tabpfn_sk_..."  # Windows PowerShell
+# Required for Model 5 (Kumo Relational Foundation Model):
+export NVIDIA_API_KEY="nvapi-..."         # Linux/macOS
+# $env:NVIDIA_API_KEY = "nvapi-..."       # Windows PowerShell
 
-# Run the end-to-end benchmark
+# (Optional) set your TabPFN API key to use the transformer model
+export TABPFN_TOKEN="tabpfn_sk_..."       # Linux/macOS
+# $env:TABPFN_TOKEN = "tabpfn_sk_..."     # Windows PowerShell
+
+# Run the end-to-end benchmark (all 5 models)
 python run_experiment.py
 ```
