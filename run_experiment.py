@@ -72,7 +72,7 @@ def main():
     # Step 6: Model 3 - TabPFN Doubly Robust DiD
     print("\n" + "-" * 60)
     print("[3/4] Running TabPFN Doubly Robust DiD (Tabular Foundation Model)...")
-    res_tabpfn = run_tabpfn_dr_did(df_wide, sample_size=2500)
+    res_tabpfn = run_tabpfn_dr_did(df_wide)
     results.append(res_tabpfn)
     print(f"      Estimate: {res_tabpfn['estimate']*100:.3f}% pts | SE: {res_tabpfn['std_error']*100:.3f}% pts | p: {res_tabpfn['p_value']:.4f}")
 
@@ -103,19 +103,27 @@ def main():
     elapsed = time.time() - start_time
 
     # Print Final Summary Table
-    print("\n" + "=" * 90)
+    print("\n" + "=" * 95)
     print(" FINAL BENCHMARK RESULTS: 30-DAY HOSPITAL READMISSION TREATMENT EFFECT (ATT)")
-    print("=" * 90)
-    print(f"{'Model / Estimator':<38} | {'ATT (% pts)':<12} | {'Std Error':<10} | {'95% Conf. Interval':<20} | {'p-value':<8}")
-    print("-" * 90)
+    print("=" * 95)
+    print(f"{'Model / Estimator':<38} | {'ATT (% pts)':<12} | {'SE (used)':<10} | {'95% Conf. Interval':<22} | {'p-value':<8}")
+    print("-" * 95)
     for r in results:
         est = f"{r['estimate']*100:+.3f}%"
-        se = f"{r['std_error']*100:.3f}%"
-        ci = f"[{r['ci_lower']*100:+.3f}%, {r['ci_upper']*100:+.3f}%]"
-        p = f"{r['p_value']:.4f}"
-        print(f"{r['model']:<38} | {est:<12} | {se:<10} | {ci:<20} | {p:<8}")
-    print("=" * 90)
+        se  = f"{r['std_error']*100:.3f}%"
+        ci  = f"[{r['ci_lower']*100:+.3f}%, {r['ci_upper']*100:+.3f}%]"
+        p   = f"{r['p_value']:.4f}"
+        print(f"{r['model']:<38} | {est:<12} | {se:<10} | {ci:<22} | {p:<8}")
+    print("=" * 95)
+
+    # Extra row for TabPFN asymptotic SE (for comparison)
+    tp = res_tabpfn
+    if "se_asymptotic" in tp:
+        print(f"\n  [Info] TabPFN asymptotic SE: {tp['se_asymptotic']*100:.3f}% (p={tp['p_value_asym']:.4f})"
+              f"  95% CI: [{tp['ci_lower_asym']*100:+.3f}%, {tp['ci_upper_asym']*100:+.3f}%]")
+        print(f"  [Info] Bootstrap SE used in table: {tp['std_error']*100:.3f}% | Dataset: {tp['n_patients']:,} patients | {tp['n_folds']}-fold x-fit | B={tp['bootstrap_B']}")
     print(f"[*] Benchmark completed in {elapsed:.1f} seconds. All outputs saved to output/ directory.")
+
 
 if __name__ == "__main__":
     main()
