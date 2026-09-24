@@ -71,7 +71,7 @@ def plot_propensity_overlap(propensity_scores: np.ndarray, treated_mask: np.ndar
 
 def plot_model_comparison(results_list: list, output_path: str = "output/model_comparison_forest_plot.png"):
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    fig, ax = plt.subplots(figsize=(10, 6), dpi=300)
+    fig, ax = plt.subplots(figsize=(11, 6), dpi=300)
 
     models = [r['model'] for r in results_list]
     estimates = [r['estimate'] * 100 for r in results_list] # convert to percentage points
@@ -104,10 +104,10 @@ def plot_model_comparison(results_list: list, output_path: str = "output/model_c
     ax.set_yticklabels(models, fontsize=10.5, fontweight='bold')
     ax.invert_yaxis()  # top-down order
     ax.set_xlabel('Estimated Average Treatment Effect on Treated (ATT) on 30d Readmission (% points)', fontsize=11, fontweight='bold')
-    ax.set_title('Head-to-Head Comparison: Traditional DiD vs. TabPFN vs. RelBench vs. Kumo RFM', fontsize=12.5, fontweight='bold', pad=15)
+    ax.set_title('Head-to-Head Comparison: Traditional DiD vs. TabPFN vs. RelBench vs. Kumo RFM', fontsize=12, fontweight='bold', pad=15)
 
     plt.tight_layout()
-    plt.savefig(output_path)
+    plt.savefig(output_path, bbox_inches='tight')
     plt.close()
     print(f"[OK] Saved forest plot to: {output_path}")
 

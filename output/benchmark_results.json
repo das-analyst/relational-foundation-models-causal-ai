@@ -37,14 +37,20 @@
   },
   {
     "model": "4. RelBench Relational Graph DiD",
-    "estimate": -0.03572581162054489,
-    "std_error": 0.013727899381332476,
-    "ci_lower": -0.06263249440795654,
-    "ci_upper": -0.008819128833133238,
-    "p_value": 0.009256739239495104,
+    "estimate": 0.0014362359579931118,
+    "std_error": 0.014996128493269232,
+    "ci_lower": -0.02795617588881458,
+    "ci_upper": 0.030828647804800807,
+    "p_value": 0.923700239659506,
+    "se_asymptotic": 0.015143489672656895,
+    "ci_lower_asym": -0.0282450038004144,
+    "ci_upper_asym": 0.031117475716400625,
+    "p_value_asym": 0.924440477595253,
     "n_patients": 16773,
-    "n_features": 35,
-    "propensity_mean": 0.4828879582479386
+    "n_features": 34,
+    "n_folds": 5,
+    "bootstrap_B": 500,
+    "propensity_mean": 0.47832194961460606
   },
   {
     "model": "5. Kumo Relational Foundation Model DR-DiD",

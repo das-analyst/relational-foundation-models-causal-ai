@@ -4,7 +4,7 @@ Compares:
 1. Naïve 2x2 DiD (Unadjusted)
 2. Two-Way Fixed Effects OLS (Linear Controls)
 3. TabPFN Doubly Robust DiD (Tabular Foundation Model)
-4. RelBench Relational Graph DiD (Multi-table Graph Embeddings)
+4. RelBench Relational Multi-Table DiD (Baseline Multi-Table Features)
 """
 
 import os
@@ -77,9 +77,9 @@ def main():
     results.append(res_tabpfn)
     print(f"      Estimate: {res_tabpfn['estimate']*100:.3f}% pts | SE: {res_tabpfn['std_error']*100:.3f}% pts | p: {res_tabpfn['p_value']:.4f}")
 
-    # Step 7: Model 4 - RelBench Relational Graph DiD
+    # Step 7: Model 4 - RelBench Relational Multi-Table DiD
     print("\n" + "-" * 60)
-    print("[4/5] Running RelBench Relational Graph DiD (Multi-Table Graph Embeddings)...")
+    print("[4/5] Running RelBench Relational Multi-Table DiD (Baseline Multi-Table Features)...")
     res_relbench = run_relational_graph_did(df_wide, db_path=db_path)
     results.append(res_relbench)
     print(f"      Estimate: {res_relbench['estimate']*100:.3f}% pts | SE: {res_relbench['std_error']*100:.3f}% pts | p: {res_relbench['p_value']:.4f}")
